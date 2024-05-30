@@ -1,1 +1,34 @@
-\x.x
+// Combinators
+ID = \x.x
+K = \x.\y.x
+KI = \x.\y.y
+Y = \f.(\x.(f (x x)) \x.(f (x x)))
+
+// Boolean Logic
+TRUE = K
+FALSE = KI
+NOT = \x.((x FALSE) TRUE)
+AND = \f.\x.((x f) x)
+OR = \x.(x x)
+NAND = \f.\x.((((f x) f) FALSE) TRUE)
+NOR = \f.\x.((((f f) x) FALSE) TRUE)
+XOR = \f.\x.((x ((f FALSE) x)) f)
+XNOR = \f.\x.((x f) ((f x) TRUE))
+
+// Church Numerals
+INC = \n.\f.\x.(f ((n f) x))
+0 = \s.\z.z
+1 = (INC 0)
+2 = (INC 1)
+3 = (INC 2)
+4 = (2 2)
+5 = (INC 4)
+6 = (INC 5)
+7 = (INC 6)
+8 = (3 2)
+9 = (INC 8)
+ZERO = \x.((x \f.FALSE) TRUE)
+PRED = \n.\f.\x.(((n \a.\b.(b (a f))) \u.x) \i.i)
+ADD = \a.\b.\f.\x.((a f) ((b f) x))
+MUL = \a.\b.\f.(a (b f))
+POW = \a.\b.(a b)

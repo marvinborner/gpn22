@@ -47,28 +47,28 @@ const show = (term) => {
 // REDUCTION
 // ---------
 
-const toHigherOrder = () => {
+const toHigherOrder = (t) => {
   const go = (env) => (t) => {
     switch (t.constructor) {
       case "application":
         return higherOrderApplication(go(env)(t.left))(go(env)(t.right));
       case "abstraction":
         return higherOrderAbstraction((x) =>
-          go(Object.assign({ ...env }, { [t.name]: x }))(t.body),
+          go({ ...env, [t.name]: x })(t.body),
         );
       case "symbol":
         if (t.name in env) return env[t.name];
-        console.warn("unbound symbol " + t.name);
-        return t;
+        throw Error("unbound symbol " + t.name);
       default:
         throw Error("unexpected " + t.constructor);
     }
   };
-  return go({});
+  return go({})(t);
 };
 
-const fromHigherOrder = () => {
+const fromHigherOrder = (t) => {
   const go = (d) => (t) => {
+    // t = t();
     switch (t.constructor) {
       case "application":
         return application(go(d)(t.left))(go(d)(t.right));
@@ -81,95 +81,116 @@ const fromHigherOrder = () => {
         throw Error("unexpected " + t.constructor);
     }
   };
-  return go(0);
+  return go(0)(t);
 };
 
 const reduce = (term) => {
-  console.log(term);
-  return fromHigherOrder()(toHigherOrder()(term));
-};
-
-// -----
-// JS IO
-// -----
-
-const fs = require("fs");
-
-const readChar = () => {
-  const buffer = Buffer.alloc(1);
-  fs.readSync(0, buffer, 0, 1);
-  return buffer.toString("utf8");
+  return fromHigherOrder(toHigherOrder(term));
 };
 
 // -------
 // PARSING
 // -------
 
-let overflow = "";
-const readNext = () => {
-  let ch = "";
-  if (overflow) {
-    ch = overflow;
-    overflow = "";
-    return ch;
-  }
-  while ((ch = readChar()).trim() == "") continue;
-  return ch;
-};
-
-const consume = (predicate) => {
+const consume = (str) => (predicate) => {
   let out = "";
-  let ch = readNext();
-  while (predicate(ch)) {
-    out += ch;
-    ch = readChar();
-    overflow = ch;
+  while (str && predicate(str[0])) {
+    out += str[0];
+    str = str.slice(1);
   }
-  return out;
+  return [out, str.trim()];
 };
 
 const isSymbol = (x) => x >= "a" && x <= "z";
 
-const isDefinition = (x) => x >= "A" && x <= "Z";
+const isDefinition = (x) => (x >= "A" && x <= "Z") || (x >= "0" && x <= "9");
 
-const parse = () => {
-  const head = readNext();
+const parseTerm = (program) => {
+  const go = (str) => {
+    // skip spaces
+    str = str.trim();
 
-  // abstraction start
-  if ("\\λ".includes(head)) {
-    const name = consume(isSymbol);
-    const body = parse();
-    return abstraction(name)(body);
-  }
+    const head = str[0];
+    const tail = str.slice(1).trim();
 
-  // application start
-  if (head == "(") {
-    const left = parse();
-    const right = parse();
-    readNext(); // skip )
-    return application(left)(right);
-  }
+    // abstraction start
+    if ("\\λ".includes(head)) {
+      const [name, tail1] = consume(tail)(isSymbol);
+      const tail2 = tail1.slice(1).trim(); // skip .
+      const [body, tail3] = go(tail2);
+      return [abstraction(name)(body), tail3];
+    }
 
-  // application end - already consumed above
-  if (head == ")") {
+    // application start
+    if (head == "(") {
+      const [left, tail1] = go(tail);
+      const [right, tail2] = go(tail1);
+      return [application(left)(right), tail2.trim().slice(1)];
+    }
+
+    // application end - already consumed above
+    if (head == ")") {
+      throw Error("unexpected " + head);
+    }
+
+    // symbol / variable (lowercase letters)
+    if (isSymbol(head)) {
+      const [sym, tail1] = consume(str)(isSymbol);
+      return [symbol(sym), tail1];
+    }
+
+    // definition (uppercase letters)
+    if (isDefinition(head)) {
+      const [name, tail1] = consume(str)(isDefinition);
+      return [definition(name), tail1];
+    }
+
     throw Error("unexpected " + head);
-  }
+  };
 
-  // symbol / variable (lowercase letters)
-  if (isSymbol(head)) {
-    const sym = consume(isSymbol);
-    return symbol(sym);
-  }
+  const [term, tail] = go(program);
+  if (tail != "") throw Error("unexpected " + tail);
+  return term;
+};
 
-  // definition (uppercase letters)
-  if (isDefinition(head)) {
-    const name = consume(isDefinition);
-    return definition(name);
-  }
+const parse = (program) => {
+  const definitions = {};
+
+  const substituteDefinition = (t) => {
+    switch (t.constructor) {
+      case "application":
+        return application(substituteDefinition(t.left))(
+          substituteDefinition(t.right),
+        );
+      case "abstraction":
+        return abstraction(t.name)(substituteDefinition(t.body));
+      case "symbol":
+        return t;
+      case "definition":
+        if (t.name in definitions) return definitions[t.name];
+        else throw Error("invalid definition " + t.name);
+      default:
+        throw Error("unexpected " + t.constructor);
+    }
+  };
+
+  program
+    .trim()
+    .split("\n")
+    .filter((line) => !(line.startsWith("//") || line.trim() == ""))
+    .forEach((line) => {
+      const [definition, term] = line.split("=");
+      definitions[definition.trim()] = substituteDefinition(
+        parseTerm(term.trim()),
+      );
+    });
+  if (!("MAIN" in definitions)) throw Error("no 'MAIN' definition");
+  return definitions["MAIN"];
 };
 
 // ---
 // CLI
 // ---
 
-console.log(show(reduce(parse())));
+const data = require("fs").readFileSync("/dev/stdin");
+console.log(show(reduce(parse(data + ""))));
