@@ -1,0 +1,2 @@
+FAC = (Y \f.\n.(((ZERO n) 1) ((MUL n) (f (PRED n)))))
+MAIN = (FAC 3)

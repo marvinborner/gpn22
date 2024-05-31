@@ -11,22 +11,9 @@ const intToName = (num) => {
 // CONSTRUCTORS
 // ------------
 
-const abstraction = (name) => (body) => ({
-  constructor: "abstraction",
-  name,
-  body,
-});
+const abstraction = (name) => (body) => ({ constructor: "abstraction", name, body });
 
-const higherOrderAbstraction = (f) => ({ constructor: "h-abstraction", f });
-
-const application = (left) => (right) => ({
-  constructor: "application",
-  left,
-  right,
-});
-
-const higherOrderApplication = (left) =>
-  left.constructor == "h-abstraction" ? left.f : application(left);
+const application = (left) => (right) => ({ constructor: "application", left, right });
 
 const symbol = (name) => ({ constructor: "symbol", name });
 
@@ -47,45 +34,81 @@ const show = (term) => {
 // REDUCTION
 // ---------
 
-const toHigherOrder = (t) => {
+// This is a very inefficient reduction method using normal order.
+// It uses de Bruijn indices to bypass alpha conversion.
+// It first reduces the outer redex (WHNF), then recursively reduces
+// the nested terms.
+
+// increment de Bruijn indices that reach out of the current environment
+const increment = (i, t) => {
+  switch (t.constructor) {
+    case "symbol":
+      return symbol(i <= t.name ? t.name + 1 : t.name);
+    case "application":
+      return application(increment(i, t.left))(increment(i, t.right));
+    case "abstraction":
+      return abstraction(null)(increment(i + 1, t.body));
+  }
+};
+
+// substitute de Bruijn index in term with other term
+const substitute = (i, t, s) => {
+  switch (t.constructor) {
+    case "symbol":
+      return i === t.name ? s : symbol(t.name > i ? t.name - 1 : t.name);
+    case "application":
+      return application(substitute(i, t.left, s))(substitute(i, t.right, s));
+    case "abstraction":
+      return abstraction(null)(substitute(i + 1, t.body, increment(0, s)));
+  }
+};
+
+// weak-head normal form (substitute until no outer redex)
+const whnf = (t) => {
+  if (t.constructor === "application") {
+    const _left = whnf(t.left);
+    return _left.constructor === "abstraction"
+      ? whnf(substitute(0, _left.body, t.right))
+      : application(_left)(t.right);
+  }
+  return t;
+};
+
+// reduce to normal form
+const nf = (t) => {
+  const w = whnf(t);
+  switch (w.constructor) {
+    case "abstraction":
+      return abstraction(null)(nf(w.body));
+    case "application":
+      return application(nf(w.left))(nf(w.right));
+  }
+  return w;
+};
+
+// convert from/to de Bruijn indices
+// we do this to bypass alpha conversion (potential problems with shadowed variables)
+const toggleDeBruijn = (t, bruijn) => {
   const go = (env) => (t) => {
     switch (t.constructor) {
       case "application":
-        return higherOrderApplication(go(env)(t.left))(go(env)(t.right));
+        return application(go(env)(t.left))(go(env)(t.right));
       case "abstraction":
-        return higherOrderAbstraction((x) =>
-          go({ ...env, [t.name]: x })(t.body),
-        );
+        if (!bruijn) return abstraction(null)(go([t.name, ...env])(t.body));
+        const name = intToName(env.length);
+        return abstraction(name)(go([name, ...env])(t.body));
       case "symbol":
-        if (t.name in env) return env[t.name];
-        throw Error("unbound symbol " + t.name);
+        if (!bruijn) return symbol(env.indexOf(t.name));
+        return symbol(env[t.name]);
       default:
         throw Error("unexpected " + t.constructor);
     }
   };
-  return go({})(t);
-};
-
-const fromHigherOrder = (t) => {
-  const go = (d) => (t) => {
-    // t = t();
-    switch (t.constructor) {
-      case "application":
-        return application(go(d)(t.left))(go(d)(t.right));
-      case "h-abstraction":
-        const name = intToName(d);
-        return abstraction(name)(go(d + 1)(t.f(symbol(name))));
-      case "symbol":
-        return t;
-      default:
-        throw Error("unexpected " + t.constructor);
-    }
-  };
-  return go(0)(t);
+  return go([])(t);
 };
 
 const reduce = (term) => {
-  return fromHigherOrder(toHigherOrder(term));
+  return toggleDeBruijn(nf(toggleDeBruijn(term, false)), true);
 };
 
 // -------
@@ -122,14 +145,14 @@ const parseTerm = (program) => {
     }
 
     // application start
-    if (head == "(") {
+    if (head === "(") {
       const [left, tail1] = go(tail);
       const [right, tail2] = go(tail1);
       return [application(left)(right), tail2.trim().slice(1)];
     }
 
     // application end - already consumed above
-    if (head == ")") {
+    if (head === ")") {
       throw Error("unexpected " + head);
     }
 
@@ -177,7 +200,7 @@ const parse = (program) => {
   program
     .trim()
     .split("\n")
-    .filter((line) => !(line.startsWith("//") || line.trim() == ""))
+    .filter((line) => !(line.startsWith("//") || line.trim() === ""))
     .forEach((line) => {
       const [definition, term] = line.split("=");
       definitions[definition.trim()] = substituteDefinition(
