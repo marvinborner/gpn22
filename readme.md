@@ -17,3 +17,4 @@ files.
 -   Related projects: [bruijn](https://bruijn.marvinborner.de),
     [lambda-screen](https://lambda-screen.marvinborner.de),
     [infinite-apply](https://infinite-apply.marvinborner.de)
+-   [Video](https://media.ccc.de/v/gpn22-262-programmieren-mit-dem-puren-lambda-kalkl#t=362)
